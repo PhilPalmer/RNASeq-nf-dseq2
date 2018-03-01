@@ -33,7 +33,10 @@
  * given `params.foo` specify on the run command line `--foo some_value`.  
  */
  
-params.reads = "$baseDir/data/ggal/*_{1,2}.fq"
+//params.reads = "$baseDir/data/ggal/*_{1,2}.fq"
+params.reads = "s3://encode.human.fastq/encodeTestSuperSmall/"
+readsChannel = "${params.reads}/*_{1,2}.fastq"
+
 params.transcriptome = "$baseDir/data/ggal/ggal_1_48850000_49020000.Ggal71.500bpflank.fa"
 params.outdir = "."
 params.multiqc = "$baseDir/multiqc"
@@ -52,8 +55,8 @@ multiqc_file = file(params.multiqc)
  
 
 Channel
-    .fromFilePairs( params.reads )
-    .ifEmpty { error "Cannot find any reads matching: ${params.reads}" }
+    .fromFilePairs( readsChannel )
+    .ifEmpty { error "Cannot find any reads matching" }
     .into { read_pairs_ch; read_pairs2_ch } 
  
 
