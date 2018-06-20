@@ -35,7 +35,7 @@
  
 //params.reads = "$baseDir/data/ggal/*_{1,2}.fq"
 params.reads = "$baseDir/data/ggal/"
-readsChannel = "${params.reads}/*_{1,2}.fastq"
+readsChannel = "${params.reads}/*_{1,2}.fq"
 
 params.transcriptome = "$baseDir/data/ggal/ggal_1_48850000_49020000.Ggal71.500bpflank.fa"
 params.outdir = "."
@@ -47,6 +47,7 @@ log.info """\
  transcriptome: ${params.transcriptome}
  reads        : ${params.reads}
  outdir       : ${params.outdir}
+ readChannel  : ${readsChannel}
  """
 
 
