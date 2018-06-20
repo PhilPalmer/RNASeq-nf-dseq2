@@ -34,7 +34,7 @@
  */
  
 //params.reads = "$baseDir/data/ggal/*_{1,2}.fq"
-params.reads = "s3://encode.human.fastq/encodeTestSuperSmall/"
+params.reads = "$baseDir/data/ggal/"
 readsChannel = "${params.reads}/*_{1,2}.fastq"
 
 params.transcriptome = "$baseDir/data/ggal/ggal_1_48850000_49020000.Ggal71.500bpflank.fa"
