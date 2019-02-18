@@ -34,11 +34,12 @@
  */
  
 //params.reads = "$baseDir/data/ggal/*_{1,2}.fq"
-params.reads = "$baseDir/data/ggal/"
+params.reads = false
 readsChannel = "${params.reads}/*_{1,2}.fq"
 
-params.transcriptome = "$baseDir/data/ggal/ggal_1_48850000_49020000.Ggal71.500bpflank.fa"
-params.outdir = "."
+params.transcriptome = false //"$baseDir/data/ggal/ggal_1_48850000_49020000.Ggal71.500bpflank.fa"
+params.accession     = false
+params.outdir = "results"
 params.multiqc = "$baseDir/multiqc"
 
 log.info """\
@@ -53,13 +54,79 @@ log.info """\
 
 transcriptome_file = file(params.transcriptome)
 multiqc_file = file(params.multiqc)
+//projectSRId = params.project
+accessionID = params.accession
  
 
 Channel
-    .fromFilePairs( readsChannel )
+    .fromPath( params.reads )
     .ifEmpty { error "Cannot find any reads matching" }
-    .into { read_pairs_ch; read_pairs2_ch } 
- 
+    .set { sraIDs } 
+
+// Channel.fromPath(params.reads)
+//     .ifEmpty { exit 1, "Text file containing SRA id's not found: ${params.reads}" }
+//     .into { sraIDs; rna_sraIDs }
+
+int threads = Runtime.getRuntime().availableProcessors()
+
+// process getSRAIDs {
+//     container 'lifebitai/kallisto-sra'
+	
+// 	cpus 1
+
+// 	input:
+// 	val projectID from projectSRId
+	
+// 	output:
+// 	file 'sra.txt' into sraIDs
+	
+// 	script:
+// 	"""
+// 	esearch -db sra -query $projectID  | efetch --format runinfo | grep SRR | cut -d ',' -f 1 > sra.txt
+// 	"""
+// }
+sraIDs.splitText().map { it -> it.trim() }.set { singleSRAId }
+
+process fastqDump {
+    tag "$id"
+    container 'lifebitai/kallisto-sra'
+
+	//publishDir params.resultdir, mode: 'copy'
+
+	cpus threads
+
+	input:
+	val id from singleSRAId
+
+	output:
+	file '*.fastq.gz' into reads
+
+	script:
+	"""
+	parallel-fastq-dump --sra-id $id --threads ${task.cpus} --gzip
+	"""	
+}
+
+reads
+    .map { file -> tuple(file.baseName, file) }
+    .into { reads_fastqc; reads_quant }
+
+process fastqc {
+    tag "FASTQC on $sample_id"
+
+    input:
+    set val(sample_id), file(reads) from reads_fastqc
+
+    output:
+    file("fastqc_${sample_id}_logs") into fastqc_ch
+
+
+    script:
+    """
+    mkdir fastqc_${sample_id}_logs
+    fastqc -o fastqc_${sample_id}_logs -f fastq -q ${reads}
+    """  
+}  
 
 process index {
     tag "$transcriptome_file.simpleName"
@@ -76,58 +143,86 @@ process index {
     """
 }
  
- 
 process quant {
-    tag "$pair_id"
+    tag "$name"
+    publishDir params.outdir, mode: 'copy'
      
     input:
     file index from index_ch
-    set pair_id, file(reads) from read_pairs_ch
+    set val(name), file(reads) from reads_quant
  
     output:
-    file(pair_id) into quant_ch
+    file(name) into quant
+    val(name) into reads_deseq
  
     script:
     """
-    salmon quant --threads $task.cpus --libType=U -i index -1 ${reads[0]} -2 ${reads[1]} -o $pair_id
+    salmon quant --threads $task.cpus --libType=U -i index -r $reads -o $name
     """
 }
-  
-process fastqc {
-    tag "FASTQC on $sample_id"
+
+quant.into { quant_deseq; quant_multiqc }
+
+process deseq2 {
+	publishDir params.outdir, mode: 'copy'
+    container 'lifebitai/rnaseq-nf-salmon-dseq2'
 
     input:
-    set sample_id, file(reads) from read_pairs2_ch
+    file(quant) from quant_deseq.collect()
 
     output:
-    file("fastqc_${sample_id}_logs") into fastqc_ch
-
+    //file('counts.RData') into countData
 
     script:
     """
-    mkdir fastqc_${sample_id}_logs
-    fastqc -o fastqc_${sample_id}_logs -f fastq -q ${reads}
-    """  
-}  
-  
-  
-process multiqc {
-    publishDir params.outdir, mode:'copy'
-       
-    input:
-    file('*') from quant_ch.mix(fastqc_ch).collect()
-    file(config) from multiqc_file
+    #!/usr/bin/env Rscript
+
+    library("tximport")
+    library("readr")
+    library("tximportData")
+
+    library("DESeq2")
+
+
+    #dir <- system.file("extdata", package="tximportData")
+    samples <- read.table(file.path(dir,"samples.txt"), header=TRUE)
+    samples\$condition <- factor(rep(c("A","B"),each=3))
+    rownames(samples) <- samples\$run
+    samples[,c("pop","center","run","condition")]
+
+    files <- file.path(dir,"salmon", samples\$run, "quant.sf.gz")
+    names(files) <- samples\$run
+
+    tx2gene <- read_csv(file.path(".", ".csv"))
+
+    txi <- tximport(files, type="salmon", tx2gene=tx2gene)
+
+
     
-    output:
-    file('multiqc_report.html')  
-     
-    script:
-    """
-    cp $config/* .
-    echo "custom_logo: \$PWD/logo.png" >> multiqc_config.yaml
-    multiqc . 
+    #ddsTxi <- DESeqDataSetFromTximport(txi,
+    #                            colData = samples,
+    #                            design = ~ condition)
     """
 }
+
+
+// process multiqc {
+//     publishDir params.outdir, mode:'copy'
+       
+//     input:
+//     file('*') from quant_multiqc.mix(fastqc_ch).collect()
+//     file(config) from multiqc_file
+    
+//     output:
+//     file('multiqc_report.html')  
+     
+//     script:
+//     """
+//     cp $config/* .
+//     echo "custom_logo: \$PWD/logo.png" >> multiqc_config.yaml
+//     multiqc . 
+//     """
+// }
  
 workflow.onComplete { 
 	println ( workflow.success ? "\nDone! Open the following report in your browser --> $params.outdir/multiqc_report.html\n" : "Oops .. something went wrong" )
