@@ -193,7 +193,7 @@ process deseq2 {
 
     script:
     """
-    #!/opt/conda/envs/RNASeq-nf-salmon-dseq2/bin/Rscript
+    #!/usr/bin/env Rscript
 
     library("tximport")
     library("readr")
