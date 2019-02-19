@@ -10,6 +10,17 @@ LABEL Phil Palmer <phil@lifebit.ai>
 
 COPY environment.yml /
 RUN conda env create -f /environment.yml && conda clean -a
-ENV PATH /opt/conda/envs/RNASeq-nf-salmon-dseq2/bin:$PATH
+ENV PATH /opt/conda/envs/RNASeq-nf-dseq2/bin:$PATH
+
+RUN mkdir /data && \
+    mkdir /data/scripts/
+
+COPY ./R/ /data/scripts/
+
+RUN chmod -R u+x /data/scripts
+
+ENV PATH=$PATH:/data/scripts/
+
+WORKDIR /data/scripts/
 
  

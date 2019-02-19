@@ -1,4 +1,4 @@
-name: RNASeq-nf-salmon-dseq2
+name: RNASeq-nf-dseq2
 channels:
   - defaults
   - conda-forge

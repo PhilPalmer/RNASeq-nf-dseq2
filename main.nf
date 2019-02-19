@@ -48,7 +48,6 @@ log.info """\
  transcriptome: ${params.transcriptome}
  reads        : ${params.reads}
  outdir       : ${params.outdir}
- readChannel  : ${readsChannel}
  """
 
 
@@ -61,7 +60,7 @@ accessionID = params.accession
 Channel
     .fromPath( params.reads )
     .ifEmpty { error "Cannot find any reads matching" }
-    .set { sraIDs } 
+    .into { reads_deseq; sra_file; sra_desseq2 } 
 
 // Channel.fromPath(params.reads)
 //     .ifEmpty { exit 1, "Text file containing SRA id's not found: ${params.reads}" }
@@ -85,6 +84,22 @@ int threads = Runtime.getRuntime().availableProcessors()
 // 	esearch -db sra -query $projectID  | efetch --format runinfo | grep SRR | cut -d ',' -f 1 > sra.txt
 // 	"""
 // }
+
+process preprocess_sra {
+    tag "$samples"
+
+	input:
+	file samples from sra_file
+
+	output:
+	file 'sras.txt' into sraIDs
+
+	script:
+	"""
+	awk -F, '{print \$1}' $samples | tail -n +2 > sras.txt
+	"""	
+}
+
 sraIDs.splitText().map { it -> it.trim() }.set { singleSRAId }
 
 process fastqDump {
@@ -108,8 +123,8 @@ process fastqDump {
 }
 
 reads
-    .map { file -> tuple(file.baseName, file) }
-    .into { reads_fastqc; reads_quant }
+    .map { file -> tuple(file.simpleName, file) }
+    .into { reads_fastqc; reads_quant; sra }
 
 process fastqc {
     tag "FASTQC on $sample_id"
@@ -145,7 +160,7 @@ process index {
  
 process quant {
     tag "$name"
-    publishDir params.outdir, mode: 'copy'
+    publishDir "${params.outdir}/salmon", mode: 'copy'
      
     input:
     file index from index_ch
@@ -153,7 +168,7 @@ process quant {
  
     output:
     file(name) into quant
-    val(name) into reads_deseq
+    //val(name) into reads_deseq
  
     script:
     """
@@ -164,65 +179,65 @@ process quant {
 quant.into { quant_deseq; quant_multiqc }
 
 process deseq2 {
+    tag "deseq2.RData"
 	publishDir params.outdir, mode: 'copy'
-    container 'lifebitai/rnaseq-nf-salmon-dseq2'
+    container 'lifebitai/rnaseq-nf-dseq2'
 
     input:
     file(quant) from quant_deseq.collect()
+    val(reads) from reads_deseq
+    file samples from sra_desseq2
 
     output:
-    //file('counts.RData') into countData
+    file('deseq.RData')
 
     script:
     """
-    #!/usr/bin/env Rscript
+    #!/opt/conda/envs/RNASeq-nf-salmon-dseq2/bin/Rscript
 
     library("tximport")
     library("readr")
     library("tximportData")
-
     library("DESeq2")
 
+    dir <- system.file("extdata", package="tximportData")
+    samples <- read.table("$samples", header=TRUE, sep=",")
 
-    #dir <- system.file("extdata", package="tximportData")
-    samples <- read.table(file.path(dir,"samples.txt"), header=TRUE)
-    samples\$condition <- factor(rep(c("A","B"),each=3))
-    rownames(samples) <- samples\$run
-    samples[,c("pop","center","run","condition")]
+    tx2gene <- read_csv(file.path(dir, "tx2gene.gencode.v27.csv"))
 
-    files <- file.path(dir,"salmon", samples\$run, "quant.sf.gz")
-    names(files) <- samples\$run
+    files <- file.path(".",samples\$samples, "quant.sf")
+    names(files) <- samples\$samples
 
-    tx2gene <- read_csv(file.path(".", ".csv"))
+    txi <- tximport(files, type="salmon", tx2gene=tx2gene, ignoreAfterBar=TRUE)
 
-    txi <- tximport(files, type="salmon", tx2gene=tx2gene)
+    condition <- samples\$condition
 
+    ddsTxi <- DESeqDataSetFromTximport(txi,
+                                    colData = samples,
+                                    design = ~ condition)
 
-    
-    #ddsTxi <- DESeqDataSetFromTximport(txi,
-    #                            colData = samples,
-    #                            design = ~ condition)
+    save(ddsTxi, file="deseq.RData")
     """
 }
 
 
-// process multiqc {
-//     publishDir params.outdir, mode:'copy'
+process multiqc {
+    publishDir "${params.outdir}/MultiQC", mode:'copy'
        
-//     input:
-//     file('*') from quant_multiqc.mix(fastqc_ch).collect()
-//     file(config) from multiqc_file
+    input:
+    file('*') from quant_multiqc.mix(fastqc_ch).collect()
+    file(config) from multiqc_file
     
-//     output:
-//     file('multiqc_report.html')  
+    output:
+    file('*')  
      
-//     script:
-//     """
-//     cp $config/* .
-//     echo "custom_logo: \$PWD/logo.png" >> multiqc_config.yaml
-//     multiqc . 
-//     """
-// }
+    script:
+    """
+    cp $config/* .
+    echo "custom_logo: \$PWD/logo.png" >> multiqc_config.yaml
+    multiqc . 
+    """
+}
  
 workflow.onComplete { 
 	println ( workflow.success ? "\nDone! Open the following report in your browser --> $params.outdir/multiqc_report.html\n" : "Oops .. something went wrong" )
