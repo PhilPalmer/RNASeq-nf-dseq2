@@ -101,6 +101,7 @@ process index {
 process quant {
     tag "$name"
     publishDir "${params.outdir}/salmon", mode: 'copy'
+    container 'lifebitai/rnaseq-nf-dseq2'
      
     input:
     file index from index_ch
