@@ -53,6 +53,8 @@ log.info """\
 
 transcriptome_file = file(params.transcriptome)
 multiqc_file = file(params.multiqc)
+//multiqc_logo = file("${params.multiqc}/logo.png")
+//multiqc_config = file("${params.multiqc}/multiqc_config.yaml")
 //projectSRId = params.project
 accessionID = params.accession
  
@@ -226,15 +228,12 @@ process multiqc {
        
     input:
     file('*') from quant_multiqc.mix(fastqc_ch).collect()
-    file(config) from multiqc_file
     
     output:
     file('*')  
      
     script:
     """
-    cp $config/* .
-    echo "custom_logo: \$PWD/logo.png" >> multiqc_config.yaml
     multiqc . 
     """
 }
