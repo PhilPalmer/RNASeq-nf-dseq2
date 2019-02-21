@@ -85,6 +85,7 @@ process fastqc {
 
 process index {
     tag "$transcriptome_file.simpleName"
+    container 'lifebitai/rnaseq-nf-dseq2'
     
     input:
     file transcriptome from transcriptome_file
